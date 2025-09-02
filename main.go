@@ -142,8 +142,8 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 
 	// Regular expressions for parsing different line types
 	addServerRe := regexp.MustCompile(`^add server\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]+)")?`)
-	addVServerRe := regexp.MustCompile(`^add lb vserver\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)`)
-	bindServiceGroupRe := regexp.MustCompile(`^bind serviceGroup\s+(\S+)\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]*)")?`)
+	addVServerRe := regexp.MustCompile(`^add lb vserver\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)\s+(\S+)`)
+	bindServiceGroupRe := regexp.MustCompile(`^bind serviceGroup\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]*)")?`)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -167,11 +167,16 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 
 		// Parse "add lb vserver" lines
 		if matches := addVServerRe.FindStringSubmatch(line); matches != nil {
+			// Handle quoted or unquoted vserver name
+			vserverName := matches[1] // quoted name
+			if vserverName == "" {
+				vserverName = matches[2] // unquoted name
+			}
 			vservers = append(vservers, VServerInfo{
-				Name:     matches[1],
-				Protocol: matches[2],
-				IP:       matches[3],
-				Port:     matches[4],
+				Name:     vserverName,
+				Protocol: matches[3],
+				IP:       matches[4],
+				Port:     matches[5],
 			})
 			continue
 		}
@@ -182,14 +187,19 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 			if strings.Contains(line, "-monitorName") {
 				continue
 			}
+			// Handle quoted or unquoted service group name
+			serviceName := matches[1] // quoted name
+			if serviceName == "" {
+				serviceName = matches[2] // unquoted name
+			}
 			comment := ""
-			if len(matches) > 4 && matches[4] != "" {
-				comment = matches[4]
+			if len(matches) > 5 && matches[5] != "" {
+				comment = matches[5]
 			}
 			serviceGroups = append(serviceGroups, ServiceGroup{
-				Name:       matches[1],
-				ServerName: matches[2],
-				Port:       matches[3],
+				Name:       serviceName,
+				ServerName: matches[3],
+				Port:       matches[4],
 				Comment:    comment,
 			})
 			continue
