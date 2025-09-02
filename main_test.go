@@ -151,6 +151,28 @@ bind serviceGroup webapp:80 web01 80`,
 			},
 			expectError: false,
 		},
+		{
+			name: "configuration with quoted service group names",
+			content: `add server web01 192.168.1.10 -comment "Web server 1"
+add server api01 192.168.1.20
+add lb vserver "web application" HTTP 10.0.1.100 80
+add lb vserver apiservice HTTP 10.0.1.101 8080
+bind serviceGroup "web application" web01 80 -comment "Web cluster"
+bind serviceGroup apiservice api01 8080`,
+			expectedServers: []ServerInfo{
+				{Name: "web01", IP: "192.168.1.10", Comment: "Web server 1"},
+				{Name: "api01", IP: "192.168.1.20", Comment: ""},
+			},
+			expectedVServers: []VServerInfo{
+				{Name: "web application", Protocol: "HTTP", IP: "10.0.1.100", Port: "80"},
+				{Name: "apiservice", Protocol: "HTTP", IP: "10.0.1.101", Port: "8080"},
+			},
+			expectedServiceGroups: []ServiceGroup{
+				{Name: "web application", ServerName: "web01", Port: "80", Comment: "Web cluster"},
+				{Name: "apiservice", ServerName: "api01", Port: "8080", Comment: ""},
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -169,7 +191,7 @@ bind serviceGroup webapp:80 web01 80`,
 			tmpfile.Close()
 
 			// Parse the file
-			servers, vservers, serviceGroups, err := parseL7Settings(tmpfile.Name())
+			servers, vservers, _, serviceGroups, err := parseL7Settings(tmpfile.Name())
 
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error but got none")
@@ -203,7 +225,7 @@ bind serviceGroup webapp:80 web01 80`,
 }
 
 func TestParseL7SettingsFileNotFound(t *testing.T) {
-	_, _, _, err := parseL7Settings("nonexistent-file.txt")
+	_, _, _, _, err := parseL7Settings("nonexistent-file.txt")
 	if err == nil {
 		t.Error("Expected error for nonexistent file, but got none")
 	}
@@ -227,7 +249,7 @@ func TestGenerateTraefikConfig(t *testing.T) {
 		{Name: "api:8080", ServerName: "api01", Port: "8080"},
 	}
 
-	config := generateTraefikConfig(servers, vservers, serviceGroups)
+	config := generateTraefikConfig(servers, vservers, []ServiceGroupDef{}, serviceGroups)
 
 	// Check if the config has the expected structure
 	if config.HTTP.Services == nil {
@@ -280,7 +302,7 @@ func TestGenerateTraefikConfigWithUnknownServer(t *testing.T) {
 		{Name: "webapp:80", ServerName: "unknown-server", Port: "80"}, // Unknown server
 	}
 
-	config := generateTraefikConfig(servers, vservers, serviceGroups)
+	config := generateTraefikConfig(servers, vservers, []ServiceGroupDef{}, serviceGroups)
 
 	webappService, exists := config.HTTP.Services["webapp:80"]
 	if !exists {
@@ -310,7 +332,7 @@ func TestGenerateMappingConfig(t *testing.T) {
 		{Name: "api:8080", ServerName: "api01", Port: "8080", Comment: ""},
 	}
 
-	mapping := generateMappingConfig(vservers, serviceGroups)
+	mapping := generateMappingConfig(vservers, []ServiceGroupDef{}, serviceGroups)
 
 	expected := MappingConfig{
 		Entries: []MappingEntry{
@@ -426,14 +448,14 @@ bind serviceGroup webapp:80 web02 80`
 	}
 
 	// Parse input
-	servers, vservers, serviceGroups, err := parseL7Settings(inputFile)
+	servers, vservers, serviceGroupDefs, serviceGroups, err := parseL7Settings(inputFile)
 	if err != nil {
 		t.Fatalf("Failed to parse input: %v", err)
 	}
 
 	// Generate configurations
-	traefik := generateTraefikConfig(servers, vservers, serviceGroups)
-	mapping := generateMappingConfig(vservers, serviceGroups)
+	traefik := generateTraefikConfig(servers, vservers, serviceGroupDefs, serviceGroups)
+	mapping := generateMappingConfig(vservers, serviceGroupDefs, serviceGroups)
 
 	// Create output directory with timestamp
 	timestamp := time.Now().Format("200601021504")
@@ -553,7 +575,7 @@ bind serviceGroup webapp:80 web03 80`
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _, err := parseL7Settings(tmpfile.Name())
+		_, _, _, _, err := parseL7Settings(tmpfile.Name())
 		if err != nil {
 			b.Fatalf("Parse error: %v", err)
 		}
@@ -579,7 +601,7 @@ func BenchmarkGenerateTraefikConfig(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = generateTraefikConfig(servers, vservers, serviceGroups)
+		_ = generateTraefikConfig(servers, vservers, []ServiceGroupDef{}, serviceGroups)
 	}
 }
 
@@ -592,13 +614,13 @@ func BenchmarkGenerateMappingConfig(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = generateMappingConfig(vservers, []ServiceGroup{})
+		_ = generateMappingConfig(vservers, []ServiceGroupDef{}, []ServiceGroup{})
 	}
 }
 
 func TestGenerateTraefikConfigEmptyInputs(t *testing.T) {
 	// Test with empty inputs
-	config := generateTraefikConfig([]ServerInfo{}, []VServerInfo{}, []ServiceGroup{})
+	config := generateTraefikConfig([]ServerInfo{}, []VServerInfo{}, []ServiceGroupDef{}, []ServiceGroup{})
 
 	if config.HTTP.Services == nil {
 		t.Error("Expected services to be initialized even with empty inputs")
@@ -621,7 +643,7 @@ func TestGenerateTraefikConfigNoMatchingServers(t *testing.T) {
 		{Name: "webapp:80", ServerName: "nonexistent-server", Port: "80"},
 	}
 
-	config := generateTraefikConfig(servers, vservers, serviceGroups)
+	config := generateTraefikConfig(servers, vservers, []ServiceGroupDef{}, serviceGroups)
 
 	// Should not create any services since no servers match
 	if len(config.HTTP.Services) != 0 {
@@ -630,7 +652,7 @@ func TestGenerateTraefikConfigNoMatchingServers(t *testing.T) {
 }
 
 func TestGenerateMappingConfigEmpty(t *testing.T) {
-	mapping := generateMappingConfig([]VServerInfo{}, []ServiceGroup{})
+	mapping := generateMappingConfig([]VServerInfo{}, []ServiceGroupDef{}, []ServiceGroup{})
 
 	if len(mapping.Entries) != 0 {
 		t.Errorf("Expected empty mapping, got %d entries", len(mapping.Entries))

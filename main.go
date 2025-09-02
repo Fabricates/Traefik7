@@ -35,6 +35,12 @@ type ServiceGroup struct {
 	Comment    string
 }
 
+// ServiceGroupDef represents a service group definition from add command
+type ServiceGroupDef struct {
+	Name    string
+	Comment string
+}
+
 // TraefikService represents a Traefik service configuration
 type TraefikService struct {
 	LoadBalancer TraefikLoadBalancer `yaml:"loadBalancer"`
@@ -83,7 +89,7 @@ func main() {
 	inputFile := os.Args[1]
 
 	// Parse the input file
-	servers, vservers, serviceGroups, err := parseL7Settings(inputFile)
+	servers, vservers, serviceGroupDefs, serviceGroups, err := parseL7Settings(inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing file: %v\n", err)
 		os.Exit(1)
@@ -100,10 +106,10 @@ func main() {
 	}
 
 	// Generate Traefik configuration
-	traefik := generateTraefikConfig(servers, vservers, serviceGroups)
+	traefik := generateTraefikConfig(servers, vservers, serviceGroupDefs, serviceGroups)
 
 	// Generate mapping configuration
-	mapping := generateMappingConfig(vservers, serviceGroups)
+	mapping := generateMappingConfig(vservers, serviceGroupDefs, serviceGroups)
 
 	// Write Traefik configuration to file
 	traefiktFile := filepath.Join(outputDir, "traefik-services.yaml")
@@ -127,15 +133,16 @@ func main() {
 }
 
 // parseL7Settings parses the L7 configuration file
-func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGroup, error) {
+func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGroupDef, []ServiceGroup, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	defer file.Close()
 
 	var servers []ServerInfo
 	var vservers []VServerInfo
+	var serviceGroupDefs []ServiceGroupDef
 	var serviceGroups []ServiceGroup
 
 	scanner := bufio.NewScanner(file)
@@ -143,6 +150,7 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 	// Regular expressions for parsing different line types
 	addServerRe := regexp.MustCompile(`^add server\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]+)")?`)
 	addVServerRe := regexp.MustCompile(`^add lb vserver\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)\s+(\S+)`)
+	addServiceGroupRe := regexp.MustCompile(`^add serviceGroup\s+(?:"([^"]+)"|(\S+))`)
 	bindServiceGroupRe := regexp.MustCompile(`^bind serviceGroup\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]*)")?`)
 
 	for scanner.Scan() {
@@ -181,6 +189,29 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 			continue
 		}
 
+		// Parse "add serviceGroup" lines
+		if matches := addServiceGroupRe.FindStringSubmatch(line); matches != nil {
+			// Handle quoted or unquoted service group name
+			serviceGroupName := matches[1] // quoted name
+			if serviceGroupName == "" {
+				serviceGroupName = matches[2] // unquoted name
+			}
+
+			// Extract comment separately using a simpler regex
+			comment := ""
+			commentRe := regexp.MustCompile(`-comment\s+"([^"]*)"`)
+			commentMatches := commentRe.FindStringSubmatch(line)
+			if len(commentMatches) > 1 {
+				comment = commentMatches[1]
+			}
+
+			serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
+				Name:    serviceGroupName,
+				Comment: comment,
+			})
+			continue
+		}
+
 		// Parse "bind serviceGroup" lines (excluding monitor bindings)
 		if matches := bindServiceGroupRe.FindStringSubmatch(line); matches != nil {
 			// Skip monitor bindings
@@ -207,18 +238,24 @@ func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	return servers, vservers, serviceGroups, nil
+	return servers, vservers, serviceGroupDefs, serviceGroups, nil
 }
 
 // generateTraefikConfig generates the Traefik configuration
-func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, serviceGroups []ServiceGroup) TraefikConfig {
+func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, serviceGroupDefs []ServiceGroupDef, serviceGroups []ServiceGroup) TraefikConfig {
 	// Create a map of server names to server info
 	serverMap := make(map[string]ServerInfo)
 	for _, server := range servers {
 		serverMap[server.Name] = server
+	}
+
+	// Create a map of service group definitions for comment lookup
+	serviceGroupDefMap := make(map[string]ServiceGroupDef)
+	for _, sgDef := range serviceGroupDefs {
+		serviceGroupDefMap[sgDef.Name] = sgDef
 	}
 
 	// Group service groups by service name
@@ -234,6 +271,11 @@ func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, service
 		var traefiktServers []TraefikServer
 		var serviceComment string
 
+		// Check if there's a service group definition with a comment (priority)
+		if sgDef, exists := serviceGroupDefMap[serviceName]; exists && sgDef.Comment != "" {
+			serviceComment = sgDef.Comment
+		}
+
 		for _, group := range groups {
 			if serverInfo, exists := serverMap[group.ServerName]; exists {
 				url := fmt.Sprintf("http://%s:%s", serverInfo.IP, group.Port)
@@ -244,7 +286,7 @@ func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, service
 					traefiktServer.Comment = serverInfo.Comment
 				}
 
-				// For service-level comment, use the first non-empty service group comment
+				// For service-level comment, use add serviceGroup comment first, then bind serviceGroup comment
 				if serviceComment == "" && group.Comment != "" {
 					serviceComment = group.Comment
 				}
@@ -271,8 +313,14 @@ func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, service
 }
 
 // generateMappingConfig generates the mapping configuration
-func generateMappingConfig(vservers []VServerInfo, serviceGroups []ServiceGroup) MappingConfig {
+func generateMappingConfig(vservers []VServerInfo, serviceGroupDefs []ServiceGroupDef, serviceGroups []ServiceGroup) MappingConfig {
 	var entries []MappingEntry
+
+	// Create a map of service group definitions for comment lookup
+	serviceGroupDefMap := make(map[string]ServiceGroupDef)
+	for _, sgDef := range serviceGroupDefs {
+		serviceGroupDefMap[sgDef.Name] = sgDef
+	}
 
 	// Create a map to find service groups by vserver name
 	serviceGroupsByVServer := make(map[string][]ServiceGroup)
@@ -286,12 +334,21 @@ func generateMappingConfig(vservers []VServerInfo, serviceGroups []ServiceGroup)
 
 		// Check if there's a service group comment for this vserver
 		comment := ""
-		if groups, exists := serviceGroupsByVServer[vserver.Name]; exists {
-			// Use the first non-empty comment found
-			for _, group := range groups {
-				if group.Comment != "" {
-					comment = group.Comment
-					break
+
+		// Priority 1: Check for add serviceGroup comment
+		if sgDef, exists := serviceGroupDefMap[vserver.Name]; exists && sgDef.Comment != "" {
+			comment = sgDef.Comment
+		}
+
+		// Priority 2: Check for bind serviceGroup comment (if no add comment found)
+		if comment == "" {
+			if groups, exists := serviceGroupsByVServer[vserver.Name]; exists {
+				// Use the first non-empty comment found
+				for _, group := range groups {
+					if group.Comment != "" {
+						comment = group.Comment
+						break
+					}
 				}
 			}
 		}
