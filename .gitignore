@@ -30,3 +30,10 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Application binary
+traefik7
+
+# Test files and output directories
+test-input.txt
+[0-9]*/
