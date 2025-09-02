@@ -305,16 +305,35 @@ func TestGenerateMappingConfig(t *testing.T) {
 		{Name: "database:3306", Protocol: "TCP", IP: "10.0.1.102", Port: "3306"},
 	}
 
-	mapping := generateMappingConfig(vservers)
-
-	expected := map[string]string{
-		"10.0.1.100:80":   "webapp:80@nacoscs",
-		"10.0.1.101:8080": "api:8080@nacoscs",
-		"10.0.1.102:3306": "database:3306@nacoscs",
+	serviceGroups := []ServiceGroup{
+		{Name: "webapp:80", ServerName: "web01", Port: "80", Comment: "Web cluster"},
+		{Name: "api:8080", ServerName: "api01", Port: "8080", Comment: ""},
 	}
 
-	if !reflect.DeepEqual(mapping, expected) {
-		t.Errorf("Mapping mismatch.\nExpected: %+v\nGot: %+v", expected, mapping)
+	mapping := generateMappingConfig(vservers, serviceGroups)
+
+	expected := MappingConfig{
+		Entries: []MappingEntry{
+			{Key: "10.0.1.100:80", Value: "webapp:80@nacoscs", Comment: "Web cluster"},
+			{Key: "10.0.1.101:8080", Value: "api:8080@nacoscs", Comment: ""},
+			{Key: "10.0.1.102:3306", Value: "database:3306@nacoscs", Comment: ""},
+		},
+	}
+
+	if len(mapping.Entries) != len(expected.Entries) {
+		t.Errorf("Expected %d mapping entries, got %d", len(expected.Entries), len(mapping.Entries))
+	}
+
+	for i, entry := range mapping.Entries {
+		if entry.Key != expected.Entries[i].Key {
+			t.Errorf("Expected key %s, got %s", expected.Entries[i].Key, entry.Key)
+		}
+		if entry.Value != expected.Entries[i].Value {
+			t.Errorf("Expected value %s, got %s", expected.Entries[i].Value, entry.Value)
+		}
+		if entry.Comment != expected.Entries[i].Comment {
+			t.Errorf("Expected comment %s, got %s", expected.Entries[i].Comment, entry.Comment)
+		}
 	}
 }
 
@@ -414,7 +433,7 @@ bind serviceGroup webapp:80 web02 80`
 
 	// Generate configurations
 	traefik := generateTraefikConfig(servers, vservers, serviceGroups)
-	mapping := generateMappingConfig(vservers)
+	mapping := generateMappingConfig(vservers, serviceGroups)
 
 	// Create output directory with timestamp
 	timestamp := time.Now().Format("200601021504")
@@ -573,7 +592,7 @@ func BenchmarkGenerateMappingConfig(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = generateMappingConfig(vservers)
+		_ = generateMappingConfig(vservers, []ServiceGroup{})
 	}
 }
 
@@ -611,13 +630,9 @@ func TestGenerateTraefikConfigNoMatchingServers(t *testing.T) {
 }
 
 func TestGenerateMappingConfigEmpty(t *testing.T) {
-	mapping := generateMappingConfig([]VServerInfo{})
+	mapping := generateMappingConfig([]VServerInfo{}, []ServiceGroup{})
 
-	if mapping == nil {
-		t.Error("Expected mapping to be initialized")
-	}
-
-	if len(mapping) != 0 {
-		t.Errorf("Expected empty mapping, got %d entries", len(mapping))
+	if len(mapping.Entries) != 0 {
+		t.Errorf("Expected empty mapping, got %d entries", len(mapping.Entries))
 	}
 }
