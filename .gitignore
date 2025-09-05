@@ -35,5 +35,6 @@ go.work.sum
 traefik7
 
 # Test files and output directories
-test-*.txt
+*test*.txt
+*debug*.txt
 [0-9]*/
