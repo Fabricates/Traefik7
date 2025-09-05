@@ -26,6 +26,99 @@ Both files are generated in a timestamp-named directory (format: YYYYMMDDHHMM) i
 
 A complete Go-based command line tool that parses L7 load balancer configuration files and generates Traefik-compatible YAML configurations.
 
+## F5 Load Balancer Concept Hierarchy
+
+This tool parses F5/NetScaler load balancer configurations and converts them to Traefik format. Understanding the F5 concept hierarchy is essential for proper configuration migration.
+
+### F5 Concept Hierarchy
+
+```mermaid
+flowchart TB
+    subgraph F5_Infrastructure["F5 Load Balancer Infrastructure"]
+        VServer1[Virtual Server<br/>webapp-vs<br/>HTTP 192.168.1.100:80]
+        VServer2[Virtual Server<br/>api-vs<br/>HTTPS 192.168.1.101:443]
+        
+        ServiceGroup1[Service Group<br/>webapp<br/>HTTP]
+        ServiceGroup2[Service Group<br/>api-backend<br/>HTTPS]
+        
+        subgraph Physical_Servers["Physical Server Pool"]
+            Server1[Server<br/>web01<br/>10.1.2.121]
+            Server2[Server<br/>web02<br/>10.1.2.122]
+            Server3[Server<br/>api01<br/>10.1.2.131]
+        end
+        
+        subgraph Server_Ports["Server:Port Bindings"]
+            Port1[web01:80]
+            Port2[web01:8080]
+            Port3[web02:80]
+            Port4[api01:443]
+            Port5[api01:8443]
+        end
+    end
+    
+    %% Virtual Server to Service Group bindings
+    VServer1 -.->|"bind lb vserver<br/>webapp-vs webapp"| ServiceGroup1
+    VServer2 -.->|"bind lb vserver<br/>api-vs api-backend"| ServiceGroup2
+    
+    %% Service Group to Server:Port bindings
+    ServiceGroup1 -.->|"bind serviceGroup<br/>webapp web01 80"| Port1
+    ServiceGroup1 -.->|"bind serviceGroup<br/>webapp web02 80"| Port3
+    ServiceGroup2 -.->|"bind serviceGroup<br/>api-backend api01 443"| Port4
+    
+    %% Server to Port relationships (one server can have multiple ports)
+    Server1 --> Port1
+    Server1 --> Port2
+    Server2 --> Port3
+    Server3 --> Port4
+    Server3 --> Port5
+    
+    %% Styling
+    classDef vserver fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef servicegroup fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef server fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef port fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    
+    class VServer1,VServer2 vserver
+    class ServiceGroup1,ServiceGroup2 servicegroup
+    class Server1,Server2,Server3 server
+    class Port1,Port2,Port3,Port4,Port5 port
+```
+
+### F5 Component Hierarchy
+
+1. **Server** - Physical backend servers that handle actual requests
+   - Defined with: `add server <name> <ip>`
+   - Example: `add server web01 10.1.2.121`
+   - **Key Point**: One server can listen on multiple ports
+
+2. **Service Group** - Logical grouping of servers providing the same service
+   - Defined with: `add serviceGroup <name> <protocol>`
+   - Bound with: `bind serviceGroup <name> <server> <port>`
+   - **Key Point**: Groups server:port combinations, not just servers
+
+3. **Virtual Server (VServer)** - External-facing load balancer endpoint
+   - Defined with: `add lb vserver <name> <protocol> <ip> <port>`
+   - Example: `add lb vserver webapp-vs HTTP 192.168.1.100 80`
+   - **Key Point**: Can be bound to zero or more service groups
+
+4. **VServer Binding** - Connection between virtual servers and service groups
+   - Defined with: `bind lb vserver <vserver> <servicegroup>`
+   - **Key Point**: Creates the routing from external endpoint to server pool
+
+### Relationships Summary
+
+- **1 Virtual Server** → **0 or more Service Groups** (via bind lb vserver)
+- **1 Service Group** → **0 or more Server:Port combinations** (via bind serviceGroup)
+- **1 Server** → **Multiple Ports** (each server can listen on different ports)
+- **Traffic Flow**: Client → Virtual Server → Service Group → Server:Port
+
+### Conversion Process
+
+The tool transforms F5 configurations into Traefik-compatible formats:
+
+- **Service Groups + Servers** → **Traefik Services with LoadBalancer**
+- **Virtual Servers** → **Mapping entries (IP:Port → Service@nacoscs)**
+
 ## Features
 
 The tool accepts L7 setting files containing commands like:

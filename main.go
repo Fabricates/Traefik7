@@ -1,514 +1,232 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/fabricates/traefik7/pkg/parser"
 )
 
-// ServerInfo represents a server with its IP address
-type ServerInfo struct {
-	Name    string
-	IP      string
-	Comment string
-}
+// verify performs verification checks on the parsed configuration
+func verify(servers []parser.ServerInfo, vservers []parser.VServerInfo, serviceGroupDefs []parser.ServiceGroupDef, serviceGroups []parser.ServiceGroup, vserverBindings []parser.VServerBinding) bool {
+	success := true
 
-// VServerInfo represents a virtual server configuration
-type VServerInfo struct {
-	Name     string
-	Protocol string
-	IP       string
-	Port     string
-}
+	// Check if all referenced servers exist
+	serverMap := make(map[string]bool)
+	for _, server := range servers {
+		serverMap[server.Name] = true
+	}
 
-// ServiceGroup represents a service group binding
-type ServiceGroup struct {
-	Name       string
-	ServerName string
-	Port       string
-	Comment    string
-}
+	for _, sg := range serviceGroups {
+		if !serverMap[sg.ServerName] {
+			fmt.Printf("Error: Service group '%s' references non-existent server '%s'\n", sg.Name, sg.ServerName)
+			success = false
+		}
+	}
 
-// ServiceGroupDef represents a service group definition from add command
-type ServiceGroupDef struct {
-	Name    string
-	Comment string
-}
+	// Check if all service groups have at least one server binding
+	serviceGroupMap := make(map[string]bool)
+	for _, sg := range serviceGroups {
+		serviceGroupMap[sg.Name] = true
+	}
 
-// TraefikService represents a Traefik service configuration
-type TraefikService struct {
-	LoadBalancer TraefikLoadBalancer `yaml:"loadBalancer"`
-	Comment      string              `yaml:"-"` // Service-level comment (not serialized)
-}
+	for _, sgDef := range serviceGroupDefs {
+		if !serviceGroupMap[sgDef.Name] {
+			fmt.Printf("Warning: Service group '%s' is defined but has no server bindings\n", sgDef.Name)
+		}
+	}
 
-// TraefikLoadBalancer represents the load balancer configuration
-type TraefikLoadBalancer struct {
-	Servers []TraefikServer `yaml:"servers"`
-}
+	// Check for duplicate server names
+	seenServers := make(map[string]bool)
+	for _, server := range servers {
+		if seenServers[server.Name] {
+			fmt.Printf("Error: Duplicate server name '%s'\n", server.Name)
+			success = false
+		}
+		seenServers[server.Name] = true
+	}
 
-// TraefikServer represents a server in the load balancer
-type TraefikServer struct {
-	URL     string `yaml:"url"`
-	Comment string `yaml:"-"` // Don't include in YAML output
-}
+	// Check for duplicate vserver names
+	seenVServers := make(map[string]bool)
+	for _, vserver := range vservers {
+		if seenVServers[vserver.Name] {
+			fmt.Printf("Error: Duplicate vserver name '%s'\n", vserver.Name)
+			success = false
+		}
+		seenVServers[vserver.Name] = true
+	}
 
-// TraefikConfig represents the complete Traefik configuration
-type TraefikConfig struct {
-	HTTP TraefikHTTP `yaml:"http"`
-}
+	// Check vserver bindings
+	vserverMap := make(map[string]bool)
+	for _, vserver := range vservers {
+		vserverMap[vserver.Name] = true
+	}
 
-// TraefikHTTP represents the HTTP section of Traefik config
-type TraefikHTTP struct {
-	Services map[string]TraefikService `yaml:"services"`
-}
+	for _, binding := range vserverBindings {
+		if !vserverMap[binding.VServerName] {
+			fmt.Printf("Error: VServer binding references non-existent vserver '%s'\n", binding.VServerName)
+			success = false
+		}
+		// Only check service group if there's actually a service name (not policy-only bindings)
+		if binding.ServiceName != "" && !serviceGroupMap[binding.ServiceName] {
+			fmt.Printf("Warning: VServer binding '%s' references service '%s' that has no group definition\n",
+				binding.VServerName, binding.ServiceName)
+		}
+	}
 
-// MappingEntry represents a mapping entry with optional comment
-type MappingEntry struct {
-	Key     string
-	Value   string
-	Comment string
-}
+	// Report summary
+	fmt.Printf("Found %d servers, %d vservers, %d service group definitions, %d service group bindings, %d vserver bindings\n",
+		len(servers), len(vservers), len(serviceGroupDefs), len(serviceGroups), len(vserverBindings))
 
-// MappingConfig represents the mapping configuration
-type MappingConfig struct {
-	Entries []MappingEntry
+	return success
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <input-file>\n", os.Args[0])
+	// Define command line flags
+	verifyMode := flag.Bool("y", false, "Verify mode - perform verification checks on the L7 settings file")
+	outputMode := flag.Bool("o", false, "Output mode - print mappings to stdout instead of writing to files")
+	flag.Parse()
+
+	// Get remaining arguments after flags
+	args := flag.Args()
+
+	var filename string
+	var useStdin bool
+
+	// Check if we should read from stdin (pipeline or no file provided)
+	if len(args) == 0 {
+		// Check if there's data in stdin
+		stat, err := os.Stdin.Stat()
+		if err != nil {
+			if *verifyMode {
+				fmt.Println("Usage: traefik7 -y <l7_settings_file>")
+				fmt.Println("       echo 'commands' | traefik7 -y")
+			} else {
+				fmt.Println("Usage: traefik7 <l7_settings_file>")
+				fmt.Println("       traefik7 -y <l7_settings_file>  (verification mode)")
+				fmt.Println("       traefik7 -o <l7_settings_file>  (output to stdout)")
+				fmt.Println("       echo 'commands' | traefik7 [-y] [-o]")
+			}
+			os.Exit(1)
+		}
+
+		// If stdin has data (pipe or redirect), use it
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			useStdin = true
+		} else {
+			if *verifyMode {
+				fmt.Println("Usage: traefik7 -y <l7_settings_file>")
+				fmt.Println("       echo 'commands' | traefik7 -y")
+			} else {
+				fmt.Println("Usage: traefik7 <l7_settings_file>")
+				fmt.Println("       traefik7 -y <l7_settings_file>  (verification mode)")
+				fmt.Println("       traefik7 -o <l7_settings_file>  (output to stdout)")
+				fmt.Println("       echo 'commands' | traefik7 [-y] [-o]")
+			}
+			os.Exit(1)
+		}
+	} else {
+		filename = args[0]
+		useStdin = false
+	}
+
+	// Parse the L7 settings
+	var servers []parser.ServerInfo
+	var vservers []parser.VServerInfo
+	var serviceGroupDefs []parser.ServiceGroupDef
+	var serviceGroups []parser.ServiceGroup
+	var vserverBindings []parser.VServerBinding
+	var err error
+
+	if useStdin {
+		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7SettingsFromReader(os.Stdin)
+	} else {
+		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7Settings(filename)
+	}
+	if err != nil {
+		fmt.Printf("Error parsing L7 settings: %v\n", err)
 		os.Exit(1)
 	}
 
-	inputFile := os.Args[1]
-
-	// Parse the input file
-	servers, vservers, serviceGroupDefs, serviceGroups, err := parseL7Settings(inputFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing file: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Generate timestamp folder
-	timestamp := time.Now().Format("200601021504") // YYYYMMDDHHMM format
-	outputDir := timestamp
-
-	err = os.MkdirAll(outputDir, 0755)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating output directory: %v\n", err)
-		os.Exit(1)
+	// If in verification mode, perform verification and exit
+	if *verifyMode {
+		verified := verify(servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings)
+		if !verified {
+			fmt.Println("Verification failed")
+			os.Exit(1)
+		}
+		fmt.Println("Verification passed")
+		return
 	}
 
 	// Generate Traefik configuration
-	traefik := generateTraefikConfig(servers, vservers, serviceGroupDefs, serviceGroups)
+	traefikConfig := parser.GenerateTraefikConfig(servers, vservers, serviceGroupDefs, serviceGroups)
 
 	// Generate mapping configuration
-	mapping := generateMappingConfig(vservers, serviceGroupDefs, serviceGroups)
+	mappingConfig := parser.GenerateMappingConfig(vservers, serviceGroupDefs, serviceGroups)
+
+	// If output mode is enabled, print to stdout
+	if *outputMode {
+		fmt.Println("# Traefik Services Configuration")
+		err = parser.WriteTraefikConfigWithComments(os.Stdout, traefikConfig)
+		if err != nil {
+			fmt.Printf("Error writing Traefik config to stdout: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Println("# Mapping Configuration")
+		err = parser.WriteMappingConfigWithComments(os.Stdout, mappingConfig)
+		if err != nil {
+			fmt.Printf("Error writing mapping config to stdout: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Create timestamped output directory
+	timestamp := time.Now().Format("200601021504") // yyyymmddhhMM format
+	outputDir := filepath.Join(".", timestamp)
+	err = os.MkdirAll(outputDir, 0755)
+	if err != nil {
+		fmt.Printf("Error creating output directory %s: %v\n", outputDir, err)
+		os.Exit(1)
+	}
 
 	// Write Traefik configuration to file
-	traefiktFile := filepath.Join(outputDir, "traefik-services.yaml")
-	err = writeYAMLFile(traefiktFile, traefik)
+	traefikPath := filepath.Join(outputDir, "traefik-services.yaml")
+	outputFile, err := os.Create(traefikPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing Traefik config: %v\n", err)
+		fmt.Printf("Error creating %s: %v\n", traefikPath, err)
+		os.Exit(1)
+	}
+	defer outputFile.Close()
+
+	err = parser.WriteTraefikConfigWithComments(outputFile, traefikConfig)
+	if err != nil {
+		fmt.Printf("Error writing Traefik config: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Write mapping configuration to file
-	mappingFile := filepath.Join(outputDir, "mapping.yaml")
-	err = writeYAMLFile(mappingFile, mapping)
+	mappingPath := filepath.Join(outputDir, "mapping.yaml")
+	mappingFile, err := os.Create(mappingPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing mapping config: %v\n", err)
+		fmt.Printf("Error creating %s: %v\n", mappingPath, err)
+		os.Exit(1)
+	}
+	defer mappingFile.Close()
+
+	err = parser.WriteMappingConfigWithComments(mappingFile, mappingConfig)
+	if err != nil {
+		fmt.Printf("Error writing mapping config: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Successfully generated configurations in directory: %s\n", outputDir)
-	fmt.Printf("  - %s\n", traefiktFile)
-	fmt.Printf("  - %s\n", mappingFile)
-}
-
-// parseL7Settings parses the L7 configuration file
-func parseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGroupDef, []ServiceGroup, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	defer file.Close()
-
-	var servers []ServerInfo
-	var vservers []VServerInfo
-	var serviceGroupDefs []ServiceGroupDef
-	var serviceGroups []ServiceGroup
-
-	scanner := bufio.NewScanner(file)
-
-	// Regular expressions for parsing different line types
-	addServerRe := regexp.MustCompile(`^add server\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]+)")?`)
-	addVServerRe := regexp.MustCompile(`^add lb vserver\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)\s+(\S+)`)
-	addServiceGroupRe := regexp.MustCompile(`^add serviceGroup\s+(?:"([^"]+)"|(\S+))`)
-	bindServiceGroupRe := regexp.MustCompile(`^bind serviceGroup\s+(?:"([^"]+)"|(\S+))\s+(\S+)\s+(\S+)(?:\s+-comment\s+"([^"]*)")?`)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Parse "add server" lines
-		if matches := addServerRe.FindStringSubmatch(line); matches != nil {
-			comment := ""
-			if len(matches) > 3 && matches[3] != "" {
-				comment = matches[3]
-			}
-			servers = append(servers, ServerInfo{
-				Name:    matches[1],
-				IP:      matches[2],
-				Comment: comment,
-			})
-			continue
-		}
-
-		// Parse "add lb vserver" lines
-		if matches := addVServerRe.FindStringSubmatch(line); matches != nil {
-			// Handle quoted or unquoted vserver name
-			vserverName := matches[1] // quoted name
-			if vserverName == "" {
-				vserverName = matches[2] // unquoted name
-			}
-			vservers = append(vservers, VServerInfo{
-				Name:     vserverName,
-				Protocol: matches[3],
-				IP:       matches[4],
-				Port:     matches[5],
-			})
-			continue
-		}
-
-		// Parse "add serviceGroup" lines
-		if matches := addServiceGroupRe.FindStringSubmatch(line); matches != nil {
-			// Handle quoted or unquoted service group name
-			serviceGroupName := matches[1] // quoted name
-			if serviceGroupName == "" {
-				serviceGroupName = matches[2] // unquoted name
-			}
-
-			// Extract comment separately using a simpler regex
-			comment := ""
-			commentRe := regexp.MustCompile(`-comment\s+"([^"]*)"`)
-			commentMatches := commentRe.FindStringSubmatch(line)
-			if len(commentMatches) > 1 {
-				comment = commentMatches[1]
-			}
-
-			serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
-				Name:    serviceGroupName,
-				Comment: comment,
-			})
-			continue
-		}
-
-		// Parse "bind serviceGroup" lines (excluding monitor bindings)
-		if matches := bindServiceGroupRe.FindStringSubmatch(line); matches != nil {
-			// Skip monitor bindings
-			if strings.Contains(line, "-monitorName") {
-				continue
-			}
-			// Handle quoted or unquoted service group name
-			serviceName := matches[1] // quoted name
-			if serviceName == "" {
-				serviceName = matches[2] // unquoted name
-			}
-			comment := ""
-			if len(matches) > 5 && matches[5] != "" {
-				comment = matches[5]
-			}
-			serviceGroups = append(serviceGroups, ServiceGroup{
-				Name:       serviceName,
-				ServerName: matches[3],
-				Port:       matches[4],
-				Comment:    comment,
-			})
-			continue
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	return servers, vservers, serviceGroupDefs, serviceGroups, nil
-}
-
-// generateTraefikConfig generates the Traefik configuration
-func generateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, serviceGroupDefs []ServiceGroupDef, serviceGroups []ServiceGroup) TraefikConfig {
-	// Create a map of server names to server info
-	serverMap := make(map[string]ServerInfo)
-	for _, server := range servers {
-		serverMap[server.Name] = server
-	}
-
-	// Create a map of service group definitions for comment lookup
-	serviceGroupDefMap := make(map[string]ServiceGroupDef)
-	for _, sgDef := range serviceGroupDefs {
-		serviceGroupDefMap[sgDef.Name] = sgDef
-	}
-
-	// Group service groups by service name
-	serviceGroupMap := make(map[string][]ServiceGroup)
-	for _, sg := range serviceGroups {
-		serviceGroupMap[sg.Name] = append(serviceGroupMap[sg.Name], sg)
-	}
-
-	services := make(map[string]TraefikService)
-
-	// For each service group, create a Traefik service
-	for serviceName, groups := range serviceGroupMap {
-		var traefiktServers []TraefikServer
-		var serviceComment string
-
-		// Check if there's a service group definition with a comment (priority)
-		if sgDef, exists := serviceGroupDefMap[serviceName]; exists && sgDef.Comment != "" {
-			serviceComment = sgDef.Comment
-		}
-
-		for _, group := range groups {
-			if serverInfo, exists := serverMap[group.ServerName]; exists {
-				url := fmt.Sprintf("http://%s:%s", serverInfo.IP, group.Port)
-				traefiktServer := TraefikServer{URL: url}
-
-				// For server-level comments, only use server comment (not service group comment)
-				if serverInfo.Comment != "" {
-					traefiktServer.Comment = serverInfo.Comment
-				}
-
-				// For service-level comment, use add serviceGroup comment first, then bind serviceGroup comment
-				if serviceComment == "" && group.Comment != "" {
-					serviceComment = group.Comment
-				}
-
-				traefiktServers = append(traefiktServers, traefiktServer)
-			}
-		}
-
-		if len(traefiktServers) > 0 {
-			services[serviceName] = TraefikService{
-				LoadBalancer: TraefikLoadBalancer{
-					Servers: traefiktServers,
-				},
-				Comment: serviceComment,
-			}
-		}
-	}
-
-	return TraefikConfig{
-		HTTP: TraefikHTTP{
-			Services: services,
-		},
-	}
-}
-
-// generateMappingConfig generates the mapping configuration
-func generateMappingConfig(vservers []VServerInfo, serviceGroupDefs []ServiceGroupDef, serviceGroups []ServiceGroup) MappingConfig {
-	var entries []MappingEntry
-
-	// Create a map of service group definitions for comment lookup
-	serviceGroupDefMap := make(map[string]ServiceGroupDef)
-	for _, sgDef := range serviceGroupDefs {
-		serviceGroupDefMap[sgDef.Name] = sgDef
-	}
-
-	// Create a map to find service groups by vserver name
-	serviceGroupsByVServer := make(map[string][]ServiceGroup)
-	for _, sg := range serviceGroups {
-		serviceGroupsByVServer[sg.Name] = append(serviceGroupsByVServer[sg.Name], sg)
-	}
-
-	for _, vserver := range vservers {
-		key := fmt.Sprintf("%s:%s", vserver.IP, vserver.Port)
-		value := fmt.Sprintf("%s@nacoscs", vserver.Name)
-
-		// Check if there's a service group comment for this vserver
-		comment := ""
-
-		// Priority 1: Check for add serviceGroup comment
-		if sgDef, exists := serviceGroupDefMap[vserver.Name]; exists && sgDef.Comment != "" {
-			comment = sgDef.Comment
-		}
-
-		// Priority 2: Check for bind serviceGroup comment (if no add comment found)
-		if comment == "" {
-			if groups, exists := serviceGroupsByVServer[vserver.Name]; exists {
-				// Use the first non-empty comment found
-				for _, group := range groups {
-					if group.Comment != "" {
-						comment = group.Comment
-						break
-					}
-				}
-			}
-		}
-
-		entries = append(entries, MappingEntry{
-			Key:     key,
-			Value:   value,
-			Comment: comment,
-		})
-	}
-
-	return MappingConfig{Entries: entries}
-}
-
-// writeYAMLFile writes data to a YAML file
-func writeYAMLFile(filename string, data interface{}) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Check if this is a TraefikConfig that needs special comment handling
-	if traefik, ok := data.(TraefikConfig); ok {
-		return writeTraefikConfigWithComments(file, traefik)
-	}
-
-	// Check if this is a MappingConfig that needs special comment handling
-	if mapping, ok := data.(MappingConfig); ok {
-		return writeMappingConfigWithComments(file, mapping)
-	}
-
-	// For other types, use standard YAML encoding
-	encoder := yaml.NewEncoder(file)
-	defer encoder.Close()
-
-	return encoder.Encode(data)
-}
-
-// writeTraefikConfigWithComments writes TraefikConfig with inline comments
-func writeTraefikConfigWithComments(file *os.File, config TraefikConfig) error {
-	// First, create a copy without comments for standard YAML marshaling
-	configCopy := TraefikConfig{
-		HTTP: TraefikHTTP{
-			Services: make(map[string]TraefikService),
-		},
-	}
-
-	// Store comments by URL for easier lookup
-	urlComments := make(map[string]string)
-	// Store service-level comments
-	serviceComments := make(map[string]string)
-
-	for serviceName, service := range config.HTTP.Services {
-		newService := TraefikService{
-			LoadBalancer: TraefikLoadBalancer{
-				Servers: make([]TraefikServer, len(service.LoadBalancer.Servers)),
-			},
-		}
-
-		for i, server := range service.LoadBalancer.Servers {
-			newService.LoadBalancer.Servers[i] = TraefikServer{
-				URL: server.URL,
-			}
-
-			// Store comment by URL if it exists
-			if server.Comment != "" {
-				urlComments[server.URL] = server.Comment
-			}
-		}
-
-		// Store service-level comment
-		if service.Comment != "" {
-			serviceComments[serviceName] = service.Comment
-		}
-
-		configCopy.HTTP.Services[serviceName] = newService
-	}
-
-	// Marshal to YAML
-	yamlBytes, err := yaml.Marshal(configCopy)
-	if err != nil {
-		return err
-	}
-
-	// Convert to string and add comments
-	yamlStr := string(yamlBytes)
-	lines := strings.Split(yamlStr, "\n")
-
-	// Process lines to add comments
-	for i, line := range lines {
-		// Look for service names and add service-level comments before them
-		trimmedLine := strings.TrimSpace(line)
-		for serviceName, comment := range serviceComments {
-			if strings.HasPrefix(trimmedLine, serviceName+":") {
-				// Add service comment on the line before the service definition
-				indentation := strings.Repeat(" ", len(line)-len(trimmedLine))
-				commentLine := indentation + "# " + comment
-				lines[i] = commentLine + "\n" + line
-				break
-			}
-		}
-
-		// Look for URL lines and add server comments
-		if strings.Contains(line, "url: http://") {
-			// Extract the URL from the line
-			urlStart := strings.Index(line, "http://")
-			if urlStart != -1 {
-				url := strings.TrimSpace(line[urlStart:])
-				if comment, exists := urlComments[url]; exists {
-					lines[i] = line + " # " + comment
-				}
-			}
-		}
-	}
-
-	// Write the modified YAML
-	_, err = file.WriteString(strings.Join(lines, "\n"))
-	return err
-}
-
-// writeMappingConfigWithComments writes MappingConfig with inline comments
-func writeMappingConfigWithComments(file *os.File, config MappingConfig) error {
-	// Create a simple map for YAML marshaling
-	mappingMap := make(map[string]string)
-	entryComments := make(map[string]string)
-
-	for _, entry := range config.Entries {
-		mappingMap[entry.Key] = entry.Value
-		if entry.Comment != "" {
-			entryComments[entry.Key] = entry.Comment
-		}
-	}
-
-	// Marshal to YAML
-	yamlBytes, err := yaml.Marshal(mappingMap)
-	if err != nil {
-		return err
-	}
-
-	// Convert to string and add comments
-	yamlStr := string(yamlBytes)
-	lines := strings.Split(yamlStr, "\n")
-
-	// Process lines to add comments
-	for i, line := range lines {
-		// Look for mapping lines (key: value format)
-		if strings.Contains(line, ": ") {
-			// Extract the key from the line
-			colonIndex := strings.Index(line, ": ")
-			if colonIndex != -1 {
-				key := strings.TrimSpace(line[:colonIndex])
-				if comment, exists := entryComments[key]; exists {
-					lines[i] = line + " # " + comment
-				}
-			}
-		}
-	}
-
-	// Write the modified YAML
-	_, err = file.WriteString(strings.Join(lines, "\n"))
-	return err
+	fmt.Printf("Successfully generated files in directory: %s\n", outputDir)
+	fmt.Printf("  - %s\n", traefikPath)
+	fmt.Printf("  - %s\n", mappingPath)
 }
