@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // CommandProcessor handles processing of parsed F5 commands
@@ -393,4 +395,54 @@ func GenerateMappingConfig(vservers []VServerInfo, serviceGroupDefs []ServiceGro
 	}
 
 	return MappingConfig{Entries: entries}
+}
+
+// ReadTraefikConfig reads and parses a Traefik configuration file
+func ReadTraefikConfig(filename string) (TraefikConfig, error) {
+	var config TraefikConfig
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return config, fmt.Errorf("failed to open Traefik config file: %v", err)
+	}
+	defer file.Close()
+
+	decoder := yaml.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		return config, fmt.Errorf("failed to parse Traefik config YAML: %v", err)
+	}
+
+	return config, nil
+}
+
+// ReadMappingConfig reads and parses a mapping configuration file
+func ReadMappingConfig(filename string) (MappingConfig, error) {
+	var config MappingConfig
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return config, fmt.Errorf("failed to open mapping config file: %v", err)
+	}
+	defer file.Close()
+
+	// Read the YAML file as a map first
+	var mappingMap map[string]string
+	decoder := yaml.NewDecoder(file)
+	err = decoder.Decode(&mappingMap)
+	if err != nil {
+		return config, fmt.Errorf("failed to parse mapping config YAML: %v", err)
+	}
+
+	// Convert map to MappingConfig format
+	for key, value := range mappingMap {
+		config.Entries = append(config.Entries, MappingEntry{
+			Key:   key,
+			Value: value,
+			// Comments are not preserved when reading YAML
+			Comment: "",
+		})
+	}
+
+	return config, nil
 }
