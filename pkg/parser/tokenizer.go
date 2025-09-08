@@ -98,7 +98,7 @@ type Token struct {
 	Column int
 }
 
-// Tokenizer handles lexical analysis of F5 commands
+// Tokenizer handles lexical analysis of Citrix commands
 type Tokenizer struct {
 	input   string
 	pos     int

@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// F5Command represents a parsed F5 command
-type F5Command struct {
+// CitrixCommand represents a parsed Citrix command
+type CitrixCommand struct {
 	Action     string            // add, bind, set, etc.
 	ObjectType string            // server, lb vserver, serviceGroup, etc.
 	Name       string            // object name
@@ -14,7 +14,7 @@ type F5Command struct {
 	Parameters map[string]string // named parameters (-param value)
 }
 
-// CommandParser parses F5 commands using proper syntax analysis
+// CommandParser parses Citrix commands using proper syntax analysis
 type CommandParser struct {
 	tokens  []Token
 	pos     int
@@ -238,8 +238,8 @@ func (p *CommandParser) parseParameters() map[string]string {
 	return params
 }
 
-// ParseCommand parses a complete F5 command
-func (p *CommandParser) ParseCommand() (*F5Command, error) {
+// ParseCommand parses a complete Citrix command
+func (p *CommandParser) ParseCommand() (*CitrixCommand, error) {
 	if p.current.Type == TokenEOF {
 		return nil, fmt.Errorf("empty command")
 	}
@@ -268,7 +268,7 @@ func (p *CommandParser) ParseCommand() (*F5Command, error) {
 	// Parse named parameters
 	parameters := p.parseParameters()
 
-	return &F5Command{
+	return &CitrixCommand{
 		Action:     action,
 		ObjectType: objectType,
 		Name:       name,
@@ -277,8 +277,8 @@ func (p *CommandParser) ParseCommand() (*F5Command, error) {
 	}, nil
 }
 
-// ParseF5Command is a convenience function to parse a command string
-func ParseF5Command(commandLine string) (*F5Command, error) {
+// ParseCitrixCommand is a convenience function to parse a command string
+func ParseCitrixCommand(commandLine string) (*CitrixCommand, error) {
 	// Skip empty lines and comments
 	commandLine = strings.TrimSpace(commandLine)
 	if commandLine == "" || strings.HasPrefix(commandLine, "#") {

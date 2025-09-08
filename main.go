@@ -85,16 +85,16 @@ func verify(servers []parser.ServerInfo, vservers []parser.VServerInfo, serviceG
 	return success
 }
 
-// verifyWithMappingsAndSource performs enhanced verification by comparing F5 commands with generated mappings
+// verifyWithMappingsAndSource performs enhanced verification by comparing Citrix commands with generated mappings
 // Supports both file input and stdin input
 func verifyWithMappingsAndSource(inputSource, mappingFolder string, useStdin bool) bool {
 	if useStdin {
-		fmt.Printf("Enhanced verification: comparing F5 commands from stdin with mappings in '%s'\n", mappingFolder)
+		fmt.Printf("Enhanced verification: comparing Citrix commands from stdin with mappings in '%s'\n", mappingFolder)
 	} else {
-		fmt.Printf("Enhanced verification: comparing F5 commands in '%s' with mappings in '%s'\n", inputSource, mappingFolder)
+		fmt.Printf("Enhanced verification: comparing Citrix commands in '%s' with mappings in '%s'\n", inputSource, mappingFolder)
 	}
 
-	// Parse the F5 settings
+	// Parse the Citrix settings
 	var servers []parser.ServerInfo
 	var vservers []parser.VServerInfo
 	var serviceGroupDefs []parser.ServiceGroupDef
@@ -109,7 +109,7 @@ func verifyWithMappingsAndSource(inputSource, mappingFolder string, useStdin boo
 	}
 
 	if err != nil {
-		fmt.Printf("Error parsing F5 settings: %v\n", err)
+		fmt.Printf("Error parsing Citrix settings: %v\n", err)
 		return false
 	}
 
@@ -159,7 +159,7 @@ func verifyWithMappingsAndSource(inputSource, mappingFolder string, useStdin boo
 		success = verifyMappings(expectedMappingConfig, actualMappingConfig) && success
 	}
 
-	// Verify that all F5 services have corresponding Traefik services
+	// Verify that all Citrix services have corresponding Traefik services
 	fmt.Println("\n=== Verifying Service Coverage ===")
 	success = verifyServiceCoverage(serviceGroups, expectedTraefikConfig) && success
 
@@ -168,7 +168,7 @@ func verifyWithMappingsAndSource(inputSource, mappingFolder string, useStdin boo
 	success = verifyVServerCoverage(vservers, expectedMappingConfig) && success
 
 	if success {
-		fmt.Println("\n✅ Enhanced verification passed - all F5 commands correctly mapped!")
+		fmt.Println("\n✅ Enhanced verification passed - all Citrix commands correctly mapped!")
 	} else {
 		fmt.Println("\n❌ Enhanced verification failed - discrepancies found!")
 	}
@@ -271,7 +271,7 @@ func verifyMappings(expected, actual parser.MappingConfig) bool {
 	return success
 }
 
-// verifyServiceCoverage ensures all F5 service groups have corresponding Traefik services
+// verifyServiceCoverage ensures all Citrix service groups have corresponding Traefik services
 func verifyServiceCoverage(serviceGroups []parser.ServiceGroup, traefikConfig parser.TraefikConfig) bool {
 	success := true
 
@@ -284,17 +284,17 @@ func verifyServiceCoverage(serviceGroups []parser.ServiceGroup, traefikConfig pa
 	// Check if each service group has a corresponding Traefik service
 	for serviceName := range serviceGroupNames {
 		if _, exists := traefikConfig.HTTP.Services[serviceName]; !exists {
-			fmt.Printf("❌ F5 service group '%s' not found in Traefik services\n", serviceName)
+			fmt.Printf("❌ Citrix service group '%s' not found in Traefik services\n", serviceName)
 			success = false
 		} else {
-			fmt.Printf("✅ F5 service group '%s' mapped to Traefik service\n", serviceName)
+			fmt.Printf("✅ Citrix service group '%s' mapped to Traefik service\n", serviceName)
 		}
 	}
 
 	return success
 }
 
-// verifyVServerCoverage ensures all F5 virtual servers have corresponding mappings
+// verifyVServerCoverage ensures all Citrix virtual servers have corresponding mappings
 func verifyVServerCoverage(vservers []parser.VServerInfo, mappingConfig parser.MappingConfig) bool {
 	success := true
 
@@ -312,10 +312,10 @@ func verifyVServerCoverage(vservers []parser.VServerInfo, mappingConfig parser.M
 	// Check if each virtual server has a corresponding mapping
 	for _, vserver := range vservers {
 		if !mappingsByVServer[vserver.Name] {
-			fmt.Printf("❌ F5 virtual server '%s' (%s:%s) not found in mappings\n", vserver.Name, vserver.IP, vserver.Port)
+			fmt.Printf("❌ Citrix virtual server '%s' (%s:%s) not found in mappings\n", vserver.Name, vserver.IP, vserver.Port)
 			success = false
 		} else {
-			fmt.Printf("✅ F5 virtual server '%s' (%s:%s) mapped correctly\n", vserver.Name, vserver.IP, vserver.Port)
+			fmt.Printf("✅ Citrix virtual server '%s' (%s:%s) mapped correctly\n", vserver.Name, vserver.IP, vserver.Port)
 		}
 	}
 
@@ -326,7 +326,7 @@ func main() {
 	// Define command line flags
 	verifyMode := flag.Bool("y", false, "Verify mode - perform verification checks on the L7 settings file and mapping folder")
 	outputMode := flag.Bool("o", false, "Output mode - print mappings to stdout instead of writing to files")
-	inputFile := flag.String("i", "", "Input F5 settings file (use '-' or omit for stdin)")
+	inputFile := flag.String("i", "", "Input Citrix settings file (use '-' or omit for stdin)")
 	mappingFolder := flag.String("m", "", "Mapping folder containing traefik-services.yaml and mapping.yaml (required for verification mode)")
 	flag.Parse()
 

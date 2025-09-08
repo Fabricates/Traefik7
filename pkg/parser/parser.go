@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CommandProcessor handles processing of parsed F5 commands
+// CommandProcessor handles processing of parsed Citrix commands
 type CommandProcessor struct{}
 
 // NewCommandProcessor creates a new command processor
@@ -19,7 +19,7 @@ func NewCommandProcessor() *CommandProcessor {
 }
 
 // handleAddCommand processes add commands
-func (p *CommandProcessor) handleAddCommand(command *F5Command, servers *[]ServerInfo, vservers *[]VServerInfo, serviceGroupDefs *[]ServiceGroupDef) error {
+func (p *CommandProcessor) handleAddCommand(command *CitrixCommand, servers *[]ServerInfo, vservers *[]VServerInfo, serviceGroupDefs *[]ServiceGroupDef) error {
 	objectType := strings.ToLower(strings.ReplaceAll(command.ObjectType, " ", ""))
 	switch objectType {
 	case "server":
@@ -35,7 +35,7 @@ func (p *CommandProcessor) handleAddCommand(command *F5Command, servers *[]Serve
 }
 
 // handleAddServer processes "add server" commands
-func (p *CommandProcessor) handleAddServer(command *F5Command, servers *[]ServerInfo) error {
+func (p *CommandProcessor) handleAddServer(command *CitrixCommand, servers *[]ServerInfo) error {
 	if len(command.Arguments) < 1 {
 		return fmt.Errorf("add server command requires IP address argument")
 	}
@@ -52,7 +52,7 @@ func (p *CommandProcessor) handleAddServer(command *F5Command, servers *[]Server
 }
 
 // handleAddLBVServer processes "add lb vserver" commands
-func (p *CommandProcessor) handleAddLBVServer(command *F5Command, vservers *[]VServerInfo) error {
+func (p *CommandProcessor) handleAddLBVServer(command *CitrixCommand, vservers *[]VServerInfo) error {
 	if len(command.Arguments) < 3 {
 		return fmt.Errorf("add lb vserver command requires protocol, IP, and port arguments")
 	}
@@ -68,7 +68,7 @@ func (p *CommandProcessor) handleAddLBVServer(command *F5Command, vservers *[]VS
 }
 
 // handleAddServiceGroup processes "add serviceGroup" commands
-func (p *CommandProcessor) handleAddServiceGroup(command *F5Command, serviceGroupDefs *[]ServiceGroupDef) error {
+func (p *CommandProcessor) handleAddServiceGroup(command *CitrixCommand, serviceGroupDefs *[]ServiceGroupDef) error {
 	comment := command.Parameters["-comment"]
 	protocol := ""
 	if len(command.Arguments) > 0 {
@@ -85,7 +85,7 @@ func (p *CommandProcessor) handleAddServiceGroup(command *F5Command, serviceGrou
 }
 
 // handleBindCommand processes bind commands
-func (p *CommandProcessor) handleBindCommand(command *F5Command, serviceGroups *[]ServiceGroup, vserverBindings *[]VServerBinding) error {
+func (p *CommandProcessor) handleBindCommand(command *CitrixCommand, serviceGroups *[]ServiceGroup, vserverBindings *[]VServerBinding) error {
 	objectType := strings.ToLower(strings.ReplaceAll(command.ObjectType, " ", ""))
 	switch objectType {
 	case "servicegroup":
@@ -99,7 +99,7 @@ func (p *CommandProcessor) handleBindCommand(command *F5Command, serviceGroups *
 }
 
 // handleBindServiceGroup processes "bind serviceGroup" commands
-func (p *CommandProcessor) handleBindServiceGroup(command *F5Command, serviceGroups *[]ServiceGroup) error {
+func (p *CommandProcessor) handleBindServiceGroup(command *CitrixCommand, serviceGroups *[]ServiceGroup) error {
 	// Skip monitor bindings (they don't have server/port arguments)
 	if command.Parameters["-monitorName"] != "" {
 		return nil
@@ -122,7 +122,7 @@ func (p *CommandProcessor) handleBindServiceGroup(command *F5Command, serviceGro
 }
 
 // handleBindLBVServer processes "bind lb vserver" commands
-func (p *CommandProcessor) handleBindLBVServer(command *F5Command, vserverBindings *[]VServerBinding) error {
+func (p *CommandProcessor) handleBindLBVServer(command *CitrixCommand, vserverBindings *[]VServerBinding) error {
 	var serviceName string
 
 	// Check if there are arguments and if the first one doesn't start with '-'
@@ -152,13 +152,13 @@ func (p *CommandProcessor) handleBindLBVServer(command *F5Command, vserverBindin
 }
 
 // handleSetCommand processes set commands
-func (p *CommandProcessor) handleSetCommand(command *F5Command) error {
+func (p *CommandProcessor) handleSetCommand(command *CitrixCommand) error {
 	// For now, we ignore set commands as they typically modify existing objects
 	// rather than define new ones
 	return nil
 }
 
-// ParseL7Settings parses the L7 configuration file using proper F5 command parsing
+// ParseL7Settings parses the L7 configuration file using proper Citrix command parsing
 func ParseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGroupDef, []ServiceGroup, []VServerBinding, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -185,8 +185,8 @@ func ParseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 			continue
 		}
 
-		// Parse the F5 command
-		command, err := ParseF5Command(line)
+		// Parse the Citrix command
+		command, err := ParseCitrixCommand(line)
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("line %d: %v", lineNumber, err)
 		}
@@ -221,7 +221,7 @@ func ParseL7Settings(filename string) ([]ServerInfo, []VServerInfo, []ServiceGro
 	return servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, nil
 }
 
-// ParseL7SettingsFromReader parses F5 L7 settings from an io.Reader (stdin, pipe, etc.)
+// ParseL7SettingsFromReader parses Citrix L7 settings from an io.Reader (stdin, pipe, etc.)
 func ParseL7SettingsFromReader(reader io.Reader) ([]ServerInfo, []VServerInfo, []ServiceGroupDef, []ServiceGroup, []VServerBinding, error) {
 	var servers []ServerInfo
 	var vservers []VServerInfo
@@ -242,8 +242,8 @@ func ParseL7SettingsFromReader(reader io.Reader) ([]ServerInfo, []VServerInfo, [
 			continue
 		}
 
-		// Parse the F5 command
-		command, err := ParseF5Command(line)
+		// Parse the Citrix command
+		command, err := ParseCitrixCommand(line)
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("line %d: %v", lineNumber, err)
 		}
