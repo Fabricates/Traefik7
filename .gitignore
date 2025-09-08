@@ -37,4 +37,7 @@ traefik7
 # Test files and output directories
 *test*.txt
 *debug*.txt
+*test*.conf
+*debug*.conf
 [0-9]*/
+**/*.backup

@@ -103,9 +103,9 @@ func verifyWithMappingsAndSource(inputSource, mappingFolder string, useStdin boo
 	var err error
 
 	if useStdin {
-		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7SettingsFromReader(os.Stdin)
+		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7SettingsFromReaderAuto(os.Stdin)
 	} else {
-		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7Settings(inputSource)
+		servers, vservers, serviceGroupDefs, serviceGroups, vserverBindings, err = parser.ParseL7SettingsAuto(inputSource)
 	}
 
 	if err != nil {
@@ -427,9 +427,9 @@ func main() {
 	var err error
 
 	if useStdin {
-		servers, vservers, serviceGroupDefs, serviceGroups, _, err = parser.ParseL7SettingsFromReader(os.Stdin)
+		servers, vservers, serviceGroupDefs, serviceGroups, _, err = parser.ParseL7SettingsFromReaderAuto(os.Stdin)
 	} else {
-		servers, vservers, serviceGroupDefs, serviceGroups, _, err = parser.ParseL7Settings(filename)
+		servers, vservers, serviceGroupDefs, serviceGroups, _, err = parser.ParseL7SettingsAuto(filename)
 	}
 	if err != nil {
 		fmt.Printf("Error parsing L7 settings: %v\n", err)

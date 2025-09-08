@@ -152,7 +152,7 @@ func (p *CommandProcessor) handleBindLBVServer(command *CitrixCommand, vserverBi
 }
 
 // handleSetCommand processes set commands
-func (p *CommandProcessor) handleSetCommand(command *CitrixCommand) error {
+func (p *CommandProcessor) handleSetCommand(_ *CitrixCommand) error {
 	// For now, we ignore set commands as they typically modify existing objects
 	// rather than define new ones
 	return nil

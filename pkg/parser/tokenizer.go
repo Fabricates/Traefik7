@@ -135,14 +135,6 @@ func (t *Tokenizer) readChar() {
 	}
 }
 
-// peekChar returns the next character without advancing
-func (t *Tokenizer) peekChar() rune {
-	if t.pos >= len(t.input) {
-		return 0
-	}
-	return rune(t.input[t.pos])
-}
-
 // skipWhitespace skips whitespace characters
 func (t *Tokenizer) skipWhitespace() {
 	for unicode.IsSpace(t.current) && t.current != '\n' {

@@ -41,25 +41,6 @@ func (p *CommandParser) readToken() {
 	}
 }
 
-// peekToken returns the next token without advancing
-func (p *CommandParser) peekToken() Token {
-	if p.pos < len(p.tokens) {
-		return p.tokens[p.pos]
-	}
-	return Token{Type: TokenEOF}
-}
-
-// expectToken expects a specific token type and advances
-func (p *CommandParser) expectToken(expectedType TokenType) (Token, error) {
-	if p.current.Type != expectedType {
-		return Token{}, fmt.Errorf("expected %v, got %v at line %d column %d",
-			expectedType, p.current.Type, p.current.Line, p.current.Column)
-	}
-	token := p.current
-	p.readToken()
-	return token, nil
-}
-
 // parseAction parses the command action (add, bind, set, etc.)
 func (p *CommandParser) parseAction() (string, error) {
 	switch p.current.Type {
