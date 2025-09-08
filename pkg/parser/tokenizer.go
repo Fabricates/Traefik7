@@ -98,7 +98,7 @@ type Token struct {
 	Column int
 }
 
-// Tokenizer handles lexical analysis of F5 commands
+// Tokenizer handles lexical analysis of Citrix commands
 type Tokenizer struct {
 	input   string
 	pos     int
@@ -133,14 +133,6 @@ func (t *Tokenizer) readChar() {
 	} else {
 		t.column++
 	}
-}
-
-// peekChar returns the next character without advancing
-func (t *Tokenizer) peekChar() rune {
-	if t.pos >= len(t.input) {
-		return 0
-	}
-	return rune(t.input[t.pos])
 }
 
 // skipWhitespace skips whitespace characters

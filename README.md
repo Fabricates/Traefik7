@@ -1,4 +1,4 @@
-# L7traefik
+# Traefik7
 
 An parser to extract L7 settings to Traefik services🚀🚀🚀
 
@@ -26,15 +26,15 @@ Both files are generated in a timestamp-named directory (format: YYYYMMDDHHMM) i
 
 A complete Go-based command line tool that parses L7 load balancer configuration files and generates Traefik-compatible YAML configurations.
 
-## F5 Load Balancer Concept Hierarchy
+## Citrix Load Balancer Concept Hierarchy
 
-This tool parses F5/NetScaler load balancer configurations and converts them to Traefik format. Understanding the F5 concept hierarchy is essential for proper configuration migration.
+This tool parses Citrix/NetScaler load balancer configurations and converts them to Traefik format. Understanding the Citrix concept hierarchy is essential for proper configuration migration.
 
-### F5 Concept Hierarchy
+### Citrix Concept Hierarchy
 
 ```mermaid
 flowchart TB
-    subgraph F5_Infrastructure["F5 Load Balancer Infrastructure"]
+    subgraph Citrix_Infrastructure["Citrix Load Balancer Infrastructure"]
         VServer1[Virtual Server<br/>webapp-vs<br/>HTTP 192.168.1.100:80]
         VServer2[Virtual Server<br/>api-vs<br/>HTTPS 192.168.1.101:443]
         
@@ -84,7 +84,7 @@ flowchart TB
     class Port1,Port2,Port3,Port4,Port5 port
 ```
 
-### F5 Component Hierarchy
+### Citrix Component Hierarchy
 
 1. **Server** - Physical backend servers that handle actual requests
    - Defined with: `add server <name> <ip>`
@@ -114,7 +114,7 @@ flowchart TB
 
 ### Conversion Process
 
-The tool transforms F5 configurations into Traefik-compatible formats:
+The tool transforms Citrix configurations into Traefik-compatible formats:
 
 - **Service Groups + Servers** → **Traefik Services with LoadBalancer**
 - **Virtual Servers** → **Mapping entries (IP:Port → Service@nacoscs)**
