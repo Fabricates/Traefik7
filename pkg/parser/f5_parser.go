@@ -128,7 +128,7 @@ func parseF5PoolsSimple(content string) []F5PoolSimple {
 			}
 
 			// Pool member
-			if memberMatch := regexp.MustCompile(`(/Common/[^:]+):(\d+)\s*\{`).FindStringSubmatch(trimmed); memberMatch != nil {
+			if memberMatch := regexp.MustCompile(`(/Common/\d{1,3}(?:\.\d{1,3}){3}):(\d+)\s*\{`).FindStringSubmatch(trimmed); memberMatch != nil {
 				port, _ := strconv.Atoi(memberMatch[2])
 				currentPool.Members = append(currentPool.Members, F5PoolMemberSimple{
 					Address: strings.TrimPrefix(memberMatch[1], "/Common/"),
@@ -217,8 +217,9 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 	var serviceGroups []ServiceGroup
 	var vserverBindings []VServerBinding
 
-	// Create a map to track unique server IP addresses
+	// Create a map to track unique server IP addresses and their names
 	serverMap := make(map[string]bool)
+	ipToServerName := make(map[string]string)
 
 	// Convert F5 nodes to ServerInfo
 	for _, node := range nodes {
@@ -229,43 +230,18 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 			Comment: "F5 Node",
 		})
 		serverMap[node.Address] = true
+		ipToServerName[node.Address] = cleanName
 	}
 
-	// Convert F5 pools to ServiceGroupDef and ServiceGroup
+	// Create a map of pools for quick lookup
+	poolMap := make(map[string]F5PoolSimple)
 	for _, pool := range pools {
-		cleanPoolName := strings.TrimPrefix(pool.Name, "/Common/Pool_")
-
-		// Create service group definition
-		serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
-			Name:     cleanPoolName,
-			Protocol: "HTTP", // Default to HTTP for F5 pools
-			Comment:  pool.Description,
-		})
-
-		// Create service group bindings for each pool member
-		for _, member := range pool.Members {
-			// Ensure we have a server entry for this IP
-			if !serverMap[member.Address] && member.Address != "" {
-				servers = append(servers, ServerInfo{
-					Name:    member.Address, // Use IP as name if no node definition exists
-					IP:      member.Address,
-					Comment: "Auto-generated from F5 pool member",
-				})
-				serverMap[member.Address] = true
-			}
-
-			serviceGroups = append(serviceGroups, ServiceGroup{
-				Name:       cleanPoolName,
-				ServerName: member.Address, // Use IP address as server name
-				Port:       strconv.Itoa(member.Port),
-				Comment:    pool.Description,
-			})
-		}
+		poolMap[pool.Name] = pool
 	}
 
-	// Convert F5 virtual servers to VServerInfo and VServerBinding
+	// Convert F5 virtual servers to VServerInfo and create service groups using virtual server names
 	for _, virtual := range virtuals {
-		cleanVirtualName := strings.TrimPrefix(virtual.Name, "/Common/VS_")
+		cleanVirtualName := strings.TrimPrefix(virtual.Name, "/Common/")
 
 		if virtual.Destination != "" {
 			// Split destination IP:port
@@ -278,13 +254,58 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 					Port:     parts[1],
 				})
 
-				// Create vserver binding if pool is specified
+				// If this virtual server has a pool, create service group using virtual server name
 				if virtual.Pool != "" {
-					cleanPoolName := strings.TrimPrefix(virtual.Pool, "/Common/Pool_")
-					vserverBindings = append(vserverBindings, VServerBinding{
-						VServerName: cleanVirtualName,
-						ServiceName: cleanPoolName,
-						Comment:     virtual.Description,
+					if pool, exists := poolMap[virtual.Pool]; exists {
+						// Create service group definition using virtual server name
+						serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
+							Name:     cleanVirtualName, // Use virtual server name instead of pool name
+							Protocol: "HTTP",
+							Comment:  pool.Description,
+						})
+
+						// Create service group bindings for each pool member
+						for _, member := range pool.Members {
+							// Determine the server name to use
+							var serverName string
+							if existingName, exists := ipToServerName[member.Address]; exists {
+								// Use the existing node name
+								serverName = existingName
+							} else {
+								// Ensure we have a server entry for this IP
+								if !serverMap[member.Address] && member.Address != "" {
+									servers = append(servers, ServerInfo{
+										Name:    member.Address, // Use IP as name if no node definition exists
+										IP:      member.Address,
+										Comment: "Auto-generated from F5 pool member",
+									})
+									serverMap[member.Address] = true
+									ipToServerName[member.Address] = member.Address
+								}
+								serverName = member.Address
+							}
+
+							serviceGroups = append(serviceGroups, ServiceGroup{
+								Name:       cleanVirtualName, // Use virtual server name
+								ServerName: serverName,
+								Port:       strconv.Itoa(member.Port),
+								Comment:    pool.Description,
+							})
+						}
+
+						// Create vserver binding using virtual server name
+						vserverBindings = append(vserverBindings, VServerBinding{
+							VServerName: cleanVirtualName,
+							ServiceName: cleanVirtualName, // Service group also uses virtual server name
+							Comment:     virtual.Description,
+						})
+					}
+				} else {
+					// Virtual server without pool - create empty service group
+					serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
+						Name:     cleanVirtualName,
+						Protocol: "HTTP",
+						Comment:  "F5 Virtual Server without pool",
 					})
 				}
 			}
