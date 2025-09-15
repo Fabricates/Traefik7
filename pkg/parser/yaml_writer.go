@@ -24,7 +24,8 @@ func WriteTraefikConfigWithComments(w io.Writer, config TraefikConfig) error {
 
 		for _, server := range service.LoadBalancer.Servers {
 			if server.Comment != "" {
-				fmt.Fprintf(w, "          - url: %s # %s\n", server.URL, server.Comment)
+				fmt.Fprintf(w, "          # %s\n", server.Comment)
+				fmt.Fprintf(w, "          - url: %s\n", server.URL)
 			} else {
 				fmt.Fprintf(w, "          - url: %s\n", server.URL)
 			}
@@ -38,7 +39,8 @@ func WriteTraefikConfigWithComments(w io.Writer, config TraefikConfig) error {
 func WriteMappingConfigWithComments(w io.Writer, config MappingConfig) error {
 	for _, entry := range config.Entries {
 		if entry.Comment != "" {
-			fmt.Fprintf(w, "\"%s\": \"%s\" # %s\n", entry.Key, entry.Value, entry.Comment)
+			fmt.Fprintf(w, "# %s\n", entry.Comment)
+			fmt.Fprintf(w, "\"%s\": \"%s\"\n", entry.Key, entry.Value)
 		} else {
 			fmt.Fprintf(w, "\"%s\": \"%s\"\n", entry.Key, entry.Value)
 		}
