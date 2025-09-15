@@ -1,6 +1,8 @@
 # Traefik7
 
-An parser to extract L7 settings to Traefik services🚀🚀🚀
+A parser to extract L7 load balancer settings to Traefik services 🚀🚀🚀
+
+**Supports both Citrix/NetScaler and F5 BIG-IP configurations with automatic format detection and universal verification.**
 
 ## Build
 
@@ -11,7 +13,11 @@ go build -o traefik7 .
 ## Usage
 
 ```bash
+# Generate Traefik configs (auto-detects Citrix or F5 format)
 ./traefik7 <input-file>
+
+# Verification mode - works with both Citrix and F5 configs
+./traefik7 -y -i <input-file> -m <mapping-folder>
 ```
 
 The tool parses L7 load balancer configuration files and generates:
@@ -25,6 +31,18 @@ Both files are generated in a timestamp-named directory (format: YYYYMMDDHHMM) i
 # L7traefik
 
 A complete Go-based command line tool that parses L7 load balancer configuration files and generates Traefik-compatible YAML configurations.
+
+## Load Balancer Support
+
+### Supported Formats
+- **Citrix/NetScaler**: Commands like `add server`, `add lb vserver`, `bind serviceGroup`
+- **F5 BIG-IP**: Configuration blocks like `ltm node`, `ltm pool`, `ltm virtual`  
+- **Auto-detection**: Automatically identifies and parses the correct format
+
+### Key Features
+- **Universal Verification**: All verification modes work with both Citrix and F5 configurations
+- **Consistent Naming**: Uses virtual server names for service identification across both formats
+- **Production Ready**: Tested with complex real-world configurations
 
 ## Citrix Load Balancer Concept Hierarchy
 
