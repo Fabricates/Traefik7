@@ -17,10 +17,13 @@ type VServerInfo struct {
 
 // ServiceGroup represents a service group binding
 type ServiceGroup struct {
-	Name       string
-	ServerName string
-	Port       string
-	Comment    string
+	Name              string
+	ServerName        string
+	Port              string
+	Comment           string
+	Disabled          bool
+	Ratio             int
+	LoadBalancingMode string
 }
 
 // ServiceGroupDef represents a service group definition from add command
@@ -43,8 +46,9 @@ type VServerBinding struct {
 
 // TraefikService represents a Traefik service configuration
 type TraefikService struct {
-	LoadBalancer TraefikLoadBalancer `yaml:"loadBalancer"`
-	Comment      string              `yaml:"-"` // Service-level comment (not serialized)
+	LoadBalancer      TraefikLoadBalancer `yaml:"loadBalancer"`
+	Comment           string              `yaml:"-"` // Service-level comment (not serialized)
+	LoadBalancingMode string              `yaml:"-"` // Load balancing mode comment
 }
 
 // TraefikLoadBalancer represents the load balancer configuration
@@ -54,8 +58,9 @@ type TraefikLoadBalancer struct {
 
 // TraefikServer represents a server in the load balancer
 type TraefikServer struct {
-	URL     string `yaml:"url"`
-	Comment string `yaml:"-"` // Don't include in YAML output
+	URL      string `yaml:"url"`
+	Comment  string `yaml:"-"` // Don't include in YAML output
+	Disabled bool   `yaml:"-"` // Don't include in YAML output
 }
 
 // TraefikConfig represents the complete Traefik configuration

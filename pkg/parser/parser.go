@@ -304,20 +304,33 @@ func GenerateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, service
 	for serviceName, groups := range serviceGroupMap {
 		var traefiktServers []TraefikServer
 		var serviceComment string
+		var loadBalancingMode string
 
 		// Check if there's a service group definition with a comment (priority)
 		if sgDef, exists := serviceGroupDefMap[serviceName]; exists && sgDef.Comment != "" {
 			serviceComment = sgDef.Comment
 		}
 
+		// Find the load balancing mode for this service
+		for _, group := range groups {
+			if group.LoadBalancingMode != "" {
+				loadBalancingMode = group.LoadBalancingMode
+				break // Use the first non-empty load balancing mode found
+			}
+		}
+
 		for _, group := range groups {
 			if serverInfo, exists := serverMap[group.ServerName]; exists {
 				url := fmt.Sprintf("http://%s:%s", serverInfo.IP, group.Port)
-				traefiktServer := TraefikServer{URL: url}
+				traefiktServer := TraefikServer{
+					URL:      url,
+					Comment:  serverInfo.Comment,
+					Disabled: group.Disabled,
+				}
 
-				// For server-level comments, only use server comment (not service group comment)
-				if serverInfo.Comment != "" {
-					traefiktServer.Comment = serverInfo.Comment
+				// For server-level comments, use ratio information only
+				if group.Ratio > 0 {
+					traefiktServer.Comment = fmt.Sprintf("ratio:%d %s", group.Ratio, traefiktServer.Comment)
 				}
 
 				// For service-level comment, use add serviceGroup comment first, then bind serviceGroup comment
@@ -334,7 +347,8 @@ func GenerateTraefikConfig(servers []ServerInfo, vservers []VServerInfo, service
 				LoadBalancer: TraefikLoadBalancer{
 					Servers: traefiktServers,
 				},
-				Comment: serviceComment,
+				Comment:           serviceComment,
+				LoadBalancingMode: loadBalancingMode,
 			}
 		}
 	}

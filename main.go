@@ -189,37 +189,52 @@ func verifyTraefikServices(expected, actual parser.TraefikConfig) bool {
 			continue
 		}
 
-		// Check if server counts match
-		expectedCount := len(expectedService.LoadBalancer.Servers)
-		actualCount := len(actualService.LoadBalancer.Servers)
+		// Filter out disabled servers from expected and actual configurations
+		var expectedEnabledServers []parser.TraefikServer
+		for _, server := range expectedService.LoadBalancer.Servers {
+			if !server.Disabled {
+				expectedEnabledServers = append(expectedEnabledServers, server)
+			}
+		}
+
+		var actualEnabledServers []parser.TraefikServer
+		for _, server := range actualService.LoadBalancer.Servers {
+			if !server.Disabled {
+				actualEnabledServers = append(actualEnabledServers, server)
+			}
+		}
+
+		// Check if enabled server counts match
+		expectedCount := len(expectedEnabledServers)
+		actualCount := len(actualEnabledServers)
 		if expectedCount != actualCount {
-			fmt.Printf("❌ Service '%s': expected %d servers, found %d\n", serviceName, expectedCount, actualCount)
+			fmt.Printf("❌ Service '%s': expected %d enabled servers, found %d enabled servers\n", serviceName, expectedCount, actualCount)
 			success = false
 		}
 
-		// Check if all expected server URLs are present
+		// Check if all expected enabled server URLs are present
 		expectedURLs := make(map[string]bool)
-		for _, server := range expectedService.LoadBalancer.Servers {
+		for _, server := range expectedEnabledServers {
 			expectedURLs[server.URL] = true
 		}
 
-		for _, server := range actualService.LoadBalancer.Servers {
+		for _, server := range actualEnabledServers {
 			if !expectedURLs[server.URL] {
-				fmt.Printf("❌ Service '%s': unexpected server URL: %s\n", serviceName, server.URL)
+				fmt.Printf("❌ Service '%s': unexpected enabled server URL: %s\n", serviceName, server.URL)
 				success = false
 			} else {
 				delete(expectedURLs, server.URL)
 			}
 		}
 
-		// Check for missing URLs
+		// Check for missing enabled URLs
 		for missingURL := range expectedURLs {
-			fmt.Printf("❌ Service '%s': missing server URL: %s\n", serviceName, missingURL)
+			fmt.Printf("❌ Service '%s': missing enabled server URL: %s\n", serviceName, missingURL)
 			success = false
 		}
 
 		if expectedCount == actualCount && len(expectedURLs) == 0 {
-			fmt.Printf("✅ Service '%s': %d servers correctly mapped\n", serviceName, expectedCount)
+			fmt.Printf("✅ Service '%s': %d enabled servers correctly mapped\n", serviceName, expectedCount)
 		}
 	}
 
@@ -275,19 +290,26 @@ func verifyMappings(expected, actual parser.MappingConfig) bool {
 func verifyServiceCoverage(serviceGroups []parser.ServiceGroup, traefikConfig parser.TraefikConfig) bool {
 	success := true
 
-	// Collect unique service group names
-	serviceGroupNames := make(map[string]bool)
+	// Collect unique service group names and count enabled servers per group
+	serviceGroupInfo := make(map[string]int) // serviceName -> enabled server count
 	for _, sg := range serviceGroups {
-		serviceGroupNames[sg.Name] = true
+		if !sg.Disabled {
+			serviceGroupInfo[sg.Name]++
+		}
 	}
 
-	// Check if each service group has a corresponding Traefik service
-	for serviceName := range serviceGroupNames {
+	// Check if each service group with enabled servers has a corresponding Traefik service
+	for serviceName, enabledServerCount := range serviceGroupInfo {
+		if enabledServerCount == 0 {
+			// Skip service groups with no enabled servers
+			continue
+		}
+
 		if _, exists := traefikConfig.HTTP.Services[serviceName]; !exists {
 			fmt.Printf("❌ Service group '%s' not found in Traefik services\n", serviceName)
 			success = false
 		} else {
-			fmt.Printf("✅ Service group '%s' mapped to Traefik service\n", serviceName)
+			fmt.Printf("✅ Service group '%s' mapped to Traefik service (%d enabled servers)\n", serviceName, enabledServerCount)
 		}
 	}
 

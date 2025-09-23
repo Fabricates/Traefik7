@@ -15,15 +15,18 @@ type F5NodeSimple struct {
 }
 
 type F5PoolSimple struct {
-	Name        string
-	Description string
-	Members     []F5PoolMemberSimple
-	Monitor     string
+	Name              string
+	Description       string
+	Members           []F5PoolMemberSimple
+	Monitor           string
+	LoadBalancingMode string
 }
 
 type F5PoolMemberSimple struct {
-	Address string
-	Port    int
+	Address  string
+	Port     int
+	Disabled bool
+	Ratio    int
 }
 
 type F5VirtualSimple struct {
@@ -130,15 +133,44 @@ func parseF5PoolsSimple(content string) []F5PoolSimple {
 			// Pool member
 			if memberMatch := regexp.MustCompile(`(/Common/\d{1,3}(?:\.\d{1,3}){3}):(\d+)\s*\{`).FindStringSubmatch(trimmed); memberMatch != nil {
 				port, _ := strconv.Atoi(memberMatch[2])
-				currentPool.Members = append(currentPool.Members, F5PoolMemberSimple{
+				member := F5PoolMemberSimple{
 					Address: strings.TrimPrefix(memberMatch[1], "/Common/"),
 					Port:    port,
-				})
+					Ratio:   1, // Default ratio is 1
+				}
+
+				// Check if this member is disabled by looking ahead in the content
+				memberStart := strings.Index(content, memberMatch[0])
+				if memberStart != -1 {
+					// Look for session user-disabled within this member's block
+					memberBlockEnd := strings.Index(content[memberStart:], "}")
+					if memberBlockEnd != -1 {
+						memberBlock := content[memberStart : memberStart+memberBlockEnd]
+						if strings.Contains(memberBlock, "session user-disabled") {
+							member.Disabled = true
+						}
+
+						// Check for ratio setting
+						ratioPattern := regexp.MustCompile(`ratio\s+(\d+)`)
+						if ratioMatch := ratioPattern.FindStringSubmatch(memberBlock); ratioMatch != nil {
+							if ratio, err := strconv.Atoi(ratioMatch[1]); err == nil {
+								member.Ratio = ratio
+							}
+						}
+					}
+				}
+
+				currentPool.Members = append(currentPool.Members, member)
 			}
 
 			// Monitor
 			if monMatch := regexp.MustCompile(`monitor\s+(.+)`).FindStringSubmatch(trimmed); monMatch != nil {
 				currentPool.Monitor = monMatch[1]
+			}
+
+			// Load balancing mode
+			if lbMatch := regexp.MustCompile(`load-balancing-mode\s+(.+)`).FindStringSubmatch(trimmed); lbMatch != nil {
+				currentPool.LoadBalancingMode = lbMatch[1]
 			}
 		}
 
@@ -227,7 +259,7 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 		servers = append(servers, ServerInfo{
 			Name:    cleanName,
 			IP:      node.Address,
-			Comment: "F5 Node",
+			Comment: "",
 		})
 		serverMap[node.Address] = true
 		ipToServerName[node.Address] = cleanName
@@ -277,7 +309,7 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 									servers = append(servers, ServerInfo{
 										Name:    member.Address, // Use IP as name if no node definition exists
 										IP:      member.Address,
-										Comment: "Auto-generated from F5 pool member",
+										Comment: "",
 									})
 									serverMap[member.Address] = true
 									ipToServerName[member.Address] = member.Address
@@ -286,10 +318,13 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 							}
 
 							serviceGroups = append(serviceGroups, ServiceGroup{
-								Name:       cleanVirtualName, // Use virtual server name
-								ServerName: serverName,
-								Port:       strconv.Itoa(member.Port),
-								Comment:    pool.Description,
+								Name:              cleanVirtualName, // Use virtual server name
+								ServerName:        serverName,
+								Port:              strconv.Itoa(member.Port),
+								Comment:           pool.Description,
+								Disabled:          member.Disabled,
+								Ratio:             member.Ratio,
+								LoadBalancingMode: pool.LoadBalancingMode,
 							})
 						}
 
@@ -305,7 +340,7 @@ func convertF5ToTraefikFormat(nodes []F5NodeSimple, pools []F5PoolSimple, virtua
 					serviceGroupDefs = append(serviceGroupDefs, ServiceGroupDef{
 						Name:     cleanVirtualName,
 						Protocol: "HTTP",
-						Comment:  "F5 Virtual Server without pool",
+						Comment:  "",
 					})
 				}
 			}

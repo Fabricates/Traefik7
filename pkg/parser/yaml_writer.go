@@ -29,6 +29,12 @@ func WriteTraefikConfigWithComments(w io.Writer, config TraefikConfig) error {
 
 		fmt.Fprintf(w, "    %s:\n", serviceName)
 		fmt.Fprintf(w, "      loadBalancer:\n")
+
+		// Write load balancing mode comment before servers
+		if service.LoadBalancingMode != "" {
+			fmt.Fprintf(w, "        # lb:%s\n", service.LoadBalancingMode)
+		}
+
 		fmt.Fprintf(w, "        servers:\n")
 
 		// Sort servers by URL
@@ -39,11 +45,21 @@ func WriteTraefikConfigWithComments(w io.Writer, config TraefikConfig) error {
 		})
 
 		for _, server := range servers {
-			if server.Comment != "" {
-				fmt.Fprintf(w, "          # %s\n", server.Comment)
-				fmt.Fprintf(w, "          - url: %s\n", server.URL)
+			if server.Disabled {
+				// Comment out disabled servers
+				if server.Comment != "" {
+					fmt.Fprintf(w, "          # DISABLED - %s\n", server.Comment)
+					fmt.Fprintf(w, "          # - url: %s\n", server.URL)
+				} else {
+					fmt.Fprintf(w, "          # - url: %s\n", server.URL)
+				}
 			} else {
-				fmt.Fprintf(w, "          - url: %s\n", server.URL)
+				if server.Comment != "" {
+					fmt.Fprintf(w, "          # %s\n", server.Comment)
+					fmt.Fprintf(w, "          - url: %s\n", server.URL)
+				} else {
+					fmt.Fprintf(w, "          - url: %s\n", server.URL)
+				}
 			}
 		}
 	}
